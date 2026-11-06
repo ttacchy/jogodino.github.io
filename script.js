@@ -1,3 +1,112 @@
+(function () {
+  var W = 800, H = 240, G = 196;          // largura, altura e linha do chão
+  var GRAVITY = 0.0019, JUMP = -0.62;     // física (px e ms)
+
+  var cv = document.getElementById('c');
+  var ctx = cv.getContext('2d');
+
+  var state = 'idle';                     // idle | running | over
+  var dino, obs, clouds, bumps;
+  var speed, score, hi = 0, gap, last, overAt = 0, legTimer = 0, legFrame = 0, wing = 0;
+
+  try { hi = parseInt(localStorage.getItem('dino-hi'), 10) || 0; } catch (e) {}
+
+  function css(v) {
+    return getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function reset() {
+    dino = { x: 50, y: G - 48, w: 44, h: 48, vy: 0, ground: true, duck: false };
+    obs = [];
+    clouds = [{ x: 200, y: 50 }, { x: 520, y: 80 }, { x: 740, y: 40 }];
+    bumps = [];
+    for (var i = 0; i < 30; i++) bumps.push({ x: rand(0, W), y: G + rand(6, 16), w: rand(2, 8) });
+    speed = 0.35;
+    score = 0;
+    gap = 400;
+  }
+
+  function start() {
+    reset();
+    state = 'running';
+    last = performance.now();
+  }
+
+  function jump() {
+    if (state === 'idle') return start();
+    if (state === 'over') {
+      if (performance.now() - overAt > 400) start();
+      return;
+    }
+    if (dino.ground) {
+      dino.vy = JUMP;
+      dino.ground = false;
+      dino.duck = false;
+    }
+  }
+
+  function setDuck(on) {
+    if (state !== 'running') return;
+    dino.duck = on;
+    if (!dino.ground && on) dino.fast = true;
+    if (!on) dino.fast = false;
+  }
+
+  function spawn() {
+    var bird = score > 250 && Math.random() < 0.3;
+    if (bird) {
+      var lift = [12, 40, 75][Math.floor(Math.random() * 3)];
+      obs.push({ type: 'bird', x: W + 20, w: 42, h: 28, y: G - lift - 28 });
+    } else {
+      var n = 1 + Math.floor(Math.random() * 3);
+      var h = Math.random() < 0.5 ? 36 : 48;
+      obs.push({ type: 'cactus', x: W + 20, w: n * 18 - 2, h: h, y: G - h, n: n });
+    }
+    gap = rand(300, 520) + speed * 450;
+  }
+
+  function hit(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function update(dt) {
+    speed = Math.min(0.85, 0.35 + score * 0.00025);
+    score += speed * dt * 0.04;
+
+    // dinossauro
+    if (dino.duck && dino.ground) { dino.w = 56; dino.h = 28; }
+    else { dino.w = 44; dino.h = 48; }
+    if (!dino.ground) {
+      dino.vy += GRAVITY * (dino.fast ? 3 : 1) * dt;
+      dino.y += dino.vy * dt;
+      if (dino.y >= G - dino.h) { dino.y = G - dino.h; dino.vy = 0; dino.ground = true; dino.fast = false; }
+    } else {
+      dino.y = G - dino.h;
+    }
+
+    legTimer += dt;
+    if (legTimer > 100) { legTimer = 0; legFrame = 1 - legFrame; wing = 1 - wing; }
+
+    // obstáculos
+    gap -= speed * dt;
+    if (gap <= 0) spawn();
+    obs.forEach(function (o) { o.x -= speed * dt * (o.type === 'bird' ? 1.15 : 1); });
+    obs = obs.filter(function (o) { return o.x + o.w > -20; });
+
+    // cenário
+    clouds.forEach(function (c) { c.x -= speed * dt * 0.2; if (c.x < -60) { c.x = W + rand(0, 100); c.y = rand(30, 90); } });
+    bumps.forEach(function (b) { b.x -= speed * dt; if (b.x < -10) { b.x = W + rand(0, 40); b.y = G + rand(6, 16); } });
+
+    // colisão (caixa um pouco menor que o desenho)
+    var box = { x: dino.x + 6, y: dino.y + 4, w: dino.w - 12, h: dino.h - 8 };
+    for (var i = 0; i < obs.length; i++) {
+      var o = obs[i];
+      if (hit(box, { x: o.x + 3, y: o.y + 3, w: o.w - 6, h: o.h - 6 })) return die();
+    }
+  }
+
+  function die() {
     state = 'over';
     overAt = performance.now();
     var s = Math.floor(score);
